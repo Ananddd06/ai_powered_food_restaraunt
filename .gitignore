@@ -1,3 +1,13 @@
 .env
 node_modules/
 dist/
+
+venv/
+backend/venv/
+__pycache__/
+*.csv
+*.geojson
+*.db
+backend/data/
+Dataset/
+.DS_Store
