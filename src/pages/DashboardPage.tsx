@@ -307,6 +307,8 @@ export const DashboardPage: React.FC = () => {
               max="30"
               value={maxDistanceKm}
               onChange={(e) => setMaxDistanceKm(Number(e.target.value))}
+              onMouseUp={() => handleSearch()}
+              onTouchEnd={() => handleSearch()}
               className="w-full accent-indigo-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
             />
           </div>
@@ -325,6 +327,8 @@ export const DashboardPage: React.FC = () => {
               step="50"
               value={targetPrice}
               onChange={(e) => setTargetPrice(Number(e.target.value))}
+              onMouseUp={() => handleSearch()}
+              onTouchEnd={() => handleSearch()}
               className="w-full accent-emerald-500 h-2 bg-slate-800 rounded-lg cursor-pointer"
             />
           </div>

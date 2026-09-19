@@ -181,7 +181,7 @@ export const RecommendationMapView: React.FC<RecommendationMapViewProps> = ({
       </MapContainer>
 
       {/* Info Badge */}
-      <div className="absolute top-4 left-4 z-20 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 border border-slate-700 shadow-xl">
+      <div className="absolute top-4 right-4 z-20 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-full flex items-center gap-2 border border-slate-700 shadow-xl">
         <MapPin className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
         <span className="text-xs font-semibold text-white">
           OpenStreetMap GIS View: {restaurants.length} Recommended Pins

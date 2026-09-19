@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: ai_restaurant_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: ai_restaurant_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ai_restaurant_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/ai_restaurant_db
+      - SECRET_KEY=gourmet_ai_super_secret_jwt_key_2026_change_in_production
+      - ACCESS_TOKEN_EXPIRE_MINUTES=10080
+      - FRONTEND_URL=http://localhost:5173
+    volumes:
+      # Map the project root to the exact absolute path the import script expects for Zomato CSV
+      - .:/Users/anand/Desktop/ai_powered_restarant
+    depends_on:
+      - db
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_restaurant_frontend
+    ports:
+      - "5173:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./index.html:/app/index.html
+      - ./vite.config.ts:/app/vite.config.ts
+      - ./package.json:/app/package.json
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

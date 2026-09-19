@@ -1,0 +1,8 @@
+<OGRVRTDataSource>
+    <OGRVRTLayer name="Zomato_Chennai_Geocoded">
+        <SrcDataSource>Zomato_Chennai_Geocoded.csv</SrcDataSource>
+        <GeometryType>wkbPoint</GeometryType>
+        <LayerSRS>WGS84</LayerSRS>
+        <GeometryField encoding="PointFromColumns" x="Longitude" y="Latitude"/>
+    </OGRVRTLayer>
+</OGRVRTDataSource>

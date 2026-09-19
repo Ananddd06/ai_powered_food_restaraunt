@@ -181,7 +181,7 @@ export const GISMapView: React.FC<GISMapViewProps> = ({
       </MapContainer>
 
       {/* Map Control Info Overlay Badge */}
-      <div className="absolute top-4 left-4 z-20 glass-panel px-3 py-1.5 rounded-full flex items-center gap-2 border border-border shadow-md">
+      <div className="absolute top-4 right-4 z-20 glass-panel px-3 py-1.5 rounded-full flex items-center gap-2 border border-border shadow-md">
         <MapPin className="w-3.5 h-3.5 text-primary animate-pulse" />
         <span className="text-xs font-semibold text-foreground">
           GIS Radius: {radiusKm} KM ({restaurants.length} Restaurants Found)
