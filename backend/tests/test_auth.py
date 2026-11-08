@@ -94,7 +94,7 @@ def test_update_user_preferences(client, test_user, auth_headers):
         "defaultRadiusKm": 10.0,
         "autoDetectLocation": False
     }
-    response = client.put("/api/v1/auth/preferences", json=payload, headers=auth_headers)
+    response = client.patch("/api/v1/auth/preferences", json=payload, headers=auth_headers)
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert "Chettinad" in data["preferredCuisines"]
