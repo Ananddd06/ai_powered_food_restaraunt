@@ -42,11 +42,17 @@ export class RestaurantService {
       
       if (filter.cuisines && filter.cuisines.length > 0) {
         // Send first selected cuisine for now
-        params.append('cuisine', filter.cuisines[0]);
+        const cuisine = filter.cuisines[0];
+        if (cuisine) {
+          params.append('cuisine', cuisine);
+        }
       }
       
       if (filter.priceLevels && filter.priceLevels.length > 0) {
-        params.append('price_level', filter.priceLevels[0]);
+        const priceLevel = filter.priceLevels[0];
+        if (priceLevel) {
+          params.append('price_level', priceLevel);
+        }
       }
       
       if (filter.openNowOnly) {
@@ -81,4 +87,3 @@ export class RestaurantService {
     }
   }
 }
-
