@@ -35,9 +35,10 @@ def safe_int(val, default=0):
         return default
 
 def main():
-    csv_file = "/Users/anand/Desktop/ai_powered_restarant/Zomato Chennai Listing 2020.csv"
-    geojson_out = "/Users/anand/Desktop/ai_powered_restarant/Zomato_Chennai_Geocoded.geojson"
-    csv_out = "/Users/anand/Desktop/ai_powered_restarant/Zomato_Chennai_Geocoded.csv"
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    csv_file = os.getenv("CSV_FILE", os.path.join(base_dir, "Zomato Chennai Listing 2020.csv"))
+    geojson_out = os.getenv("GEOJSON_OUT", os.path.join(base_dir, "Zomato_Chennai_Geocoded.geojson"))
+    csv_out = os.getenv("CSV_OUT", os.path.join(base_dir, "Zomato_Chennai_Geocoded.csv"))
     
     db = SessionLocal()
     features_list = []

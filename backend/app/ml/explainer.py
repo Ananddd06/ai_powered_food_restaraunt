@@ -4,11 +4,31 @@ Uses Qwen/Qwen2.5-72B-Instruct with Hugging Face token authentication & fast tim
 """
 
 import os
+import re
 import concurrent.futures
 from typing import Any, Dict, List, Optional
 from huggingface_hub import InferenceClient
 
 QWEN_HF_MODEL = "Qwen/Qwen2.5-72B-Instruct"
+
+def sanitize_prompt_input(text: str, max_chars: int = 150) -> str:
+    """Sanitizes user-provided input to neutralize prompt injection, delimiter escapes, and jailbreaks."""
+    if not text:
+        return ""
+    # Flatten whitespace / newlines
+    cleaned = re.sub(r"[\r\n\t]+", " ", str(text))
+    # Neutralize delimiter characters and escape quotes
+    cleaned = re.sub(r"[`\"'<{}>]", "", cleaned)
+    # Filter common adversarial injection tokens
+    injection_patterns = [
+        r"(?i)\bignore\s+(all\s+)?(previous|prior)\s+instructions\b",
+        r"(?i)\bsystem\s+prompt\b",
+        r"(?i)\byou\s+are\s+now\b",
+        r"(?i)\bjailbreak\b",
+    ]
+    for pattern in injection_patterns:
+        cleaned = re.sub(pattern, "[FILTERED]", cleaned)
+    return cleaned[:max_chars].strip()
 
 class ExplanationEngine:
     def __init__(self, model_name: str = QWEN_HF_MODEL):
@@ -66,9 +86,13 @@ class ExplanationEngine:
         dist_km = restaurant.get("distance_km", 0.0)
         features = ", ".join(restaurant.get("features", [])[:3])
 
+        safe_query = sanitize_prompt_input(query, max_chars=120)
+        safe_loc_context = sanitize_prompt_input(location_context or location, max_chars=80)
+        safe_name = sanitize_prompt_input(name, max_chars=80)
+
         prompt = (
-            f"User search query: '{query}' around {location_context or location}.\n"
-            f"Write a 2-sentence, enticing, personalized explanation of why {name} in {location} "
+            f"User search query: '{safe_query}' around {safe_loc_context}.\n"
+            f"Write a 2-sentence, enticing, personalized explanation of why {safe_name} in {location} "
             f"({dist_km:.1f} km away, rating {rating:.1f}/5, ₹{price:.0f} for two, serving {cuisines}, "
             f"famous for {top_dishes}) is a top match."
         )

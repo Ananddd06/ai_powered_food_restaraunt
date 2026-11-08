@@ -5,6 +5,14 @@ dist/
 venv/
 backend/venv/
 __pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+coverage/
+test-results*.xml
+junit/
+*.tsbuildinfo
+
 *.csv
 *.geojson
 *.db

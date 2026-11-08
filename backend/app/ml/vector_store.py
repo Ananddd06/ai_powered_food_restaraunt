@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-DATA_DIR = Path("/Users/anand/Desktop/ai_powered_restarant/backend/data")
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 INDEX_PATH = DATA_DIR / "chennai_faiss.index"
 METADATA_PATH = DATA_DIR / "processed_chennai_restaurants.json"
 EMBEDDINGS_NPY_PATH = DATA_DIR / "embeddings.npy"

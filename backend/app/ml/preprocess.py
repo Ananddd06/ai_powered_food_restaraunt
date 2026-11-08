@@ -13,8 +13,9 @@ from typing import Any, Dict, List
 
 from app.ml.chennai_geocoding import get_locality_coordinates
 
-DATASET_PATH = Path("/Users/anand/Desktop/ai_powered_restarant/Dataset/Zomato Chennai Listing 2020.csv")
-OUTPUT_DIR = Path("/Users/anand/Desktop/ai_powered_restarant/backend/data")
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATASET_PATH = Path(os.getenv("DATASET_PATH", BASE_DIR.parent / "Zomato Chennai Listing 2020.csv"))
+OUTPUT_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data"))
 OUTPUT_FILE = OUTPUT_DIR / "processed_chennai_restaurants.json"
 
 

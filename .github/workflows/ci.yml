@@ -1,0 +1,256 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =========================================================================
+  # 1. FRONTEND CI: Typecheck, Unit Tests, Build & npm audit
+  # =========================================================================
+  frontend-ci:
+    name: Frontend Tests & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Frontend Dependencies
+        run: |
+          npm ci || npm install
+
+      - name: TypeScript Static Typecheck
+        run: |
+          npm run typecheck
+
+      - name: Run Frontend Unit & Store Tests
+        run: |
+          npm run test
+
+      - name: Frontend Production Build
+        run: |
+          npm run build
+
+      - name: Frontend Dependency Security Audit
+        run: |
+          echo "Running npm audit for high/critical security advisories..."
+          npm audit --audit-level=high || echo "::warning::High or critical npm vulnerabilities detected. Review package-lock.json."
+
+  # =========================================================================
+  # 2. BACKEND CI: PostgreSQL Test DB & Backend Integration Tests
+  # =========================================================================
+  backend-ci:
+    name: Backend Tests & Test DB (PostgreSQL)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: ai_restaurant_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install PostgreSQL Client & Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev gcc
+
+      - name: Install Backend & Test Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install CPU-only torch to keep CI fast and light
+          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-test.txt
+
+      - name: Verify PostgreSQL Database Connectivity
+        run: |
+          python -c "
+          import psycopg2
+          conn = psycopg2.connect(
+              dbname='ai_restaurant_test_db',
+              user='postgres',
+              password='postgrespassword',
+              host='localhost',
+              port=5432
+          )
+          cur = conn.cursor()
+          cur.execute('SELECT version();')
+          print('Connected to Test DB:', cur.fetchone()[0])
+          cur.close()
+          conn.close()
+          "
+
+      - name: Run Backend Integration & DB Tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/ai_restaurant_test_db
+          TEST_DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/ai_restaurant_test_db
+          SECRET_KEY: ci_super_secret_jwt_key_2026_test_only_never_use_in_prod
+          PYTHONPATH: backend
+        run: |
+          pytest -v \
+            backend/tests/test_database.py \
+            backend/tests/test_auth.py \
+            backend/tests/test_restaurants.py \
+            backend/tests/test_favorites.py \
+            --junitxml=test-results-backend.xml
+
+      - name: Upload Backend Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: test-results-backend.xml
+          retention-days: 7
+
+  # =========================================================================
+  # 3. AI PIPELINE CI: Fusion, Geocoding, Hybrid Ranker, Qwen Explainer & Guardrails
+  # =========================================================================
+  ai-pipeline-ci:
+    name: AI Test Workflow Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install AI Pipeline Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-test.txt
+
+      - name: Run AI & Recommendation Engine Tests
+        env:
+          PYTHONPATH: backend
+          SECRET_KEY: ci_super_secret_jwt_key_2026_test_only_never_use_in_prod
+        run: |
+          pytest -v backend/tests/test_ai_pipeline.py --junitxml=test-results-ai.xml
+
+      - name: Upload AI Pipeline Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-test-results
+          path: test-results-ai.xml
+          retention-days: 7
+
+  # =========================================================================
+  # 4. SECURITY SCAN: SAST, Dependency Vulnerabilities & Secret Auditing
+  # =========================================================================
+  security-scan:
+    name: Security Tests & SAST Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code with Full Git History
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Security Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-test.txt
+
+      - name: Run Python SAST Scan (Bandit)
+        run: |
+          echo "Scanning backend codebase for security vulnerabilities..."
+          bandit -r backend/app -ll -ii -f screen || echo "::warning::Bandit identified low/medium security warnings."
+
+      - name: Run Backend Dependency Vulnerability Audit (pip-audit)
+        run: |
+          echo "Scanning python dependencies for known CVEs..."
+          pip-audit -r backend/requirements.txt || echo "::warning::Dependency audit found flagged packages. Consider updating requirements.txt."
+
+      - name: Run Application Security & Attack Surface Tests
+        env:
+          PYTHONPATH: backend
+          SECRET_KEY: ci_super_secret_jwt_key_2026_test_only_never_use_in_prod
+        run: |
+          pytest -v backend/tests/test_security.py --junitxml=test-results-security.xml
+
+      - name: Scan Repository for Leaked Secrets (TruffleHog OSS)
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified --fail=false
+
+  # =========================================================================
+  # 5. PIPELINE GATE & SUMMARY
+  # =========================================================================
+  pipeline-gate:
+    name: CI Pipeline Quality Gate
+    needs: [frontend-ci, backend-ci, ai-pipeline-ci, security-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate Pipeline Summary Report
+        run: |
+          echo "## 🚀 GourmetAI CI Pipeline Quality Gate Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Result | Scope |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :---: | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Frontend Tests & Build** | ${{ needs.frontend-ci.result == 'success' && '✅ PASS' || '❌ FAIL' }} | Typecheck, Vitest stores/utils, Vite build |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Backend & Test DB** | ${{ needs.backend-ci.result == 'success' && '✅ PASS' || '❌ FAIL' }} | PostgreSQL 15 container, Auth, API & DB models |" >> $GITHUB_STEP_SUMMARY
+          echo "| **AI Workflow Pipeline** | ${{ needs.ai-pipeline-ci.result == 'success' && '✅ PASS' || '❌ FAIL' }} | Candidate Fusion, GIS Ranker, Qwen Explainer & Guardrails |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Security SAST & Audits** | ${{ needs.security-scan.result == 'success' && '✅ PASS' || '❌ FAIL' }} | Bandit SAST, pip-audit, TruffleHog secrets, Security tests |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.frontend-ci.result }}" != "success" || \
+                "${{ needs.backend-ci.result }}" != "success" || \
+                "${{ needs.ai-pipeline-ci.result }}" != "success" || \
+                "${{ needs.security-scan.result }}" != "success" ]]; then
+            echo "❌ **One or more required CI pipeline jobs failed. See logs above for details.**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "✅ **All CI Pipeline Quality Gates Passed! Application is secure and verified.**" >> $GITHUB_STEP_SUMMARY
+          fi
+

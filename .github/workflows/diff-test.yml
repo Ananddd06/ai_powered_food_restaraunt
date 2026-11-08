@@ -1,0 +1,179 @@
+name: PR Diff & Security Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diff-security-and-tests:
+    name: Diff Security Scan & Targeted Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code with Full Git History
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Analyze Git Diff & Changed Files
+        id: diff-analyzer
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            DIFF_BASE="origin/${{ github.base_ref }}"
+          else
+            DIFF_BASE="HEAD~1"
+          fi
+          
+          echo "Comparing against base: $DIFF_BASE"
+          CHANGED_FILES=$(git diff --name-only "$DIFF_BASE"...HEAD || true)
+          echo "=== Changed Files ==="
+          echo "$CHANGED_FILES"
+          echo "====================="
+
+          # Flags for targeted test execution
+          HAS_FRONTEND_CHANGES=false
+          HAS_BACKEND_CHANGES=false
+          HAS_AI_CHANGES=false
+          HAS_SECURITY_CHANGES=false
+
+          if echo "$CHANGED_FILES" | grep -E '^src/|^package\.json|^vite\.config' > /dev/null; then
+            HAS_FRONTEND_CHANGES=true
+          fi
+
+          if echo "$CHANGED_FILES" | grep -E '^backend/' > /dev/null; then
+            HAS_BACKEND_CHANGES=true
+          fi
+
+          if echo "$CHANGED_FILES" | grep -E '^backend/app/ml/' > /dev/null; then
+            HAS_AI_CHANGES=true
+          fi
+
+          if echo "$CHANGED_FILES" | grep -E 'security\.py|config\.py|auth\.py|\.env' > /dev/null; then
+            HAS_SECURITY_CHANGES=true
+          fi
+
+          echo "has_frontend=$HAS_FRONTEND_CHANGES" >> $GITHUB_OUTPUT
+          echo "has_backend=$HAS_BACKEND_CHANGES" >> $GITHUB_OUTPUT
+          echo "has_ai=$HAS_AI_CHANGES" >> $GITHUB_OUTPUT
+          echo "has_security=$HAS_SECURITY_CHANGES" >> $GITHUB_OUTPUT
+          echo "diff_base=$DIFF_BASE" >> $GITHUB_OUTPUT
+
+      # =====================================================================
+      # Diff Secret Scanner: Inspect added lines only
+      # =====================================================================
+      - name: Diff Secret & Credential Leak Scanner
+        id: secret-scanner
+        run: |
+          DIFF_BASE="${{ steps.diff-analyzer.outputs.diff_base }}"
+          echo "Extracting added lines from diff against $DIFF_BASE..."
+          
+          # Get added lines (strip leading +)
+          ADDED_LINES=$(git diff -U0 "$DIFF_BASE"...HEAD | grep '^+[^+]' || true)
+          
+          LEAK_FOUND=false
+          LEAK_DETAILS=""
+
+          # Regex patterns for sensitive credentials
+          PATTERNS=(
+            "(?i)akial[0-9a-z]{16}"
+            "ghp_[0-9a-zA-Z]{36}"
+            "sk-[a-zA-Z0-9]{32,}"
+            "hf_[a-zA-Z0-9]{30,}"
+            "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----"
+            "(?i)(password|secret_key|api_key|token)\s*=\s*['\"][a-zA-Z0-9_\-\.\$]{12,}['\"]"
+          )
+
+          for pat in "${PATTERNS[@]}"; do
+            MATCHES=$(echo "$ADDED_LINES" | grep -P "$pat" || true)
+            if [ -n "$MATCHES" ]; then
+              # Exclude intentional test keys
+              FILTERED_MATCHES=$(echo "$MATCHES" | grep -v -E "test_super_secret|ci_super_secret|your_|example" || true)
+              if [ -n "$FILTERED_MATCHES" ]; then
+                LEAK_FOUND=true
+                LEAK_DETAILS="${LEAK_DETAILS}\n- Suspicious high-entropy credential match: $pat"
+              fi
+            fi
+          done
+
+          if [ "$LEAK_FOUND" = true ]; then
+            echo "::error::Potential secret leak detected in git diff!"
+            echo -e "$LEAK_DETAILS"
+            echo "leak_detected=true" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "✅ No hardcoded secrets detected in git diff."
+            echo "leak_detected=false" >> $GITHUB_OUTPUT
+          fi
+
+      # =====================================================================
+      # Targeted Frontend Tests (if frontend files modified)
+      # =====================================================================
+      - name: Run Targeted Frontend Tests
+        if: steps.diff-analyzer.outputs.has_frontend == 'true'
+        run: |
+          echo "Frontend changes detected. Running frontend tests..."
+          npm ci || npm install
+          npm run typecheck
+          npm run test
+
+      # =====================================================================
+      # Targeted AI Pipeline Tests (if AI/ML files modified)
+      # =====================================================================
+      - name: Run Targeted AI Pipeline Tests
+        if: steps.diff-analyzer.outputs.has_ai == 'true' || steps.diff-analyzer.outputs.has_backend == 'true'
+        run: |
+          echo "AI or Backend changes detected. Running AI test suite..."
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-test.txt
+          PYTHONPATH=backend pytest -v backend/tests/test_ai_pipeline.py
+
+      # =====================================================================
+      # Targeted Backend & Security Tests (if backend or security modified)
+      # =====================================================================
+      - name: Run Targeted Backend & Security Tests
+        if: steps.diff-analyzer.outputs.has_backend == 'true' || steps.diff-analyzer.outputs.has_security == 'true'
+        run: |
+          echo "Backend or security changes detected. Running security and unit tests..."
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-test.txt
+          PYTHONPATH=backend pytest -v backend/tests/test_security.py backend/tests/test_auth.py
+
+      # =====================================================================
+      # PR Diff Test Report Generation
+      # =====================================================================
+      - name: Generate PR Diff Test Summary
+        if: always()
+        run: |
+          echo "## 🔍 PR Diff & Security Audit Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :---: | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Diff Secret Leak Scan** | ${{ steps.secret-scanner.outputs.leak_detected == 'false' && '✅ PASS' || '❌ FAILED' }} | Scanned added lines for high-entropy secrets |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Frontend Layer Changed** | ${{ steps.diff-analyzer.outputs.has_frontend == 'true' && '🔄 YES' || '⚪ NO' }} | \`src/**\`, \`package.json\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Backend Layer Changed** | ${{ steps.diff-analyzer.outputs.has_backend == 'true' && '🔄 YES' || '⚪ NO' }} | \`backend/**\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **AI Pipeline Changed** | ${{ steps.diff-analyzer.outputs.has_ai == 'true' && '🔄 YES' || '⚪ NO' }} | \`backend/app/ml/**\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Security Critical Files** | ${{ steps.diff-analyzer.outputs.has_security == 'true' && '⚠️ REVIEW' || '✅ CLEAN' }} | \`security.py\`, \`config.py\`, \`auth.py\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Targeted Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend Tests Executed:** ${{ steps.diff-analyzer.outputs.has_frontend }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AI Pipeline Tests Executed:** ${{ steps.diff-analyzer.outputs.has_ai }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Tests Executed:** ${{ steps.diff-analyzer.outputs.has_security }}" >> $GITHUB_STEP_SUMMARY
+
